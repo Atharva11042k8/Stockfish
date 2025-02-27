@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chess with Stockfish</title>
+  <!-- Chessboard.js CSS -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/css/chessboard.min.css">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin-top: 20px;
+    }
+    #board {
+      width: 400px;
+      margin: 20px auto;
+    }
+    #color-selection {
+      margin-bottom: 20px;
+    }
+    #message {
+      margin-top: 20px;
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div id="color-selection">
+    <label for="playerColor">Select your color:</label>
+    <select id="playerColor">
+      <option value="white">White</option>
+      <option value="black">Black</option>
+    </select>
+    <button id="startGame">Start Game</button>
+  </div>
+  
+  <div id="board"></div>
+  <div id="message"></div>
+  
+  <!-- Load Chess.js and Chessboard.js from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/js/chessboard.min.js"></script>
+  
+  <script>
+    // Global variables
+    var board = null;
+    var game = new Chess();
+    var playerColor = 'white'; // default choice
+    var engine = null;
+    var engineReady = false;
+    
+    // Initialize Stockfish engine as a web worker.
+    function initEngine() {
+      // Make sure you have a stockfish.js file available in the same folder.
+      engine = new Worker('stockfish.js');
+      
+      engine.onmessage = function(event) {
+        var line = event.data;
+        console.log("Stockfish:", line);
+        
+        // When the engine sends "uciok", it’s ready.
+        if (line === 'uciok') {
+          engineReady = true;
+        }
+        
+        // Listen for the best move response.
+        if (line.startsWith('bestmove')) {
+          var bestMove = line.split(' ')[1];
+          // Make the move on the game (default promotion to queen)
+          game.move({ from: bestMove.substr(0,2), to: bestMove.substr(2,2), promotion: 'q' });
+          board.position(game.fen());
+          document.getElementById('message').innerText = "Your turn...";
+        }
+      };
+      
+      // Tell Stockfish to use UCI.
+      sendCommand('uci');
+    }
+    
+    // Send commands to Stockfish.
+    function sendCommand(cmd) {
+      console.log("Sending to Stockfish:", cmd);
+      engine.postMessage(cmd);
+    }
+    
+    // Ask Stockfish for its move.
+    function makeEngineMove() {
+      document.getElementById('message').innerText = "Computer is thinking...";
+      // Send current game position in FEN format.
+      sendCommand('position fen ' + game.fen());
+      // Ask for a best move at a given search depth.
+      sendCommand('go depth 15');
+    }
+    
+    // Configuration for Chessboard.js
+    var config = {
+      draggable: true,
+      position: 'start',
+      orientation: 'white', // will be updated based on user selection
+      onDragStart: function(source, piece, position, orientation) {
+        // Prevent moving pieces when it’s not the user’s turn.
+        if ((game.turn() === 'w' && playerColor === 'black') ||
+            (game.turn() === 'b' && playerColor === 'white')) {
+          return false;
+        }
+        // Prevent moving opponent’s pieces.
+        if ((piece.startsWith('b') && playerColor === 'white') ||
+            (piece.startsWith('w') && playerColor === 'black')) {
+          return false;
+        }
+      },
+      onDrop: function(source, target) {
+        // Attempt to make the move.
+        var move = game.move({
+          from: source,
+          to: target,
+          promotion: 'q' // always promote to a queen
+        });
+        // Illegal move? Snap the piece back.
+        if (move === null) return 'snapback';
+        board.position(game.fen());
+        document.getElementById('message').innerText = "Computer's turn...";
+        
+        // If game not over, ask Stockfish to move.
+        if (!game.game_over()) {
+          setTimeout(function() {
+            makeEngineMove();
+          }, 250);
+        }
+      },
+      onSnapEnd: function() {
+        board.position(game.fen());
+      }
+    };
+    
+    // Start game when user clicks the "Start Game" button.
+    document.getElementById('startGame').addEventListener('click', function() {
+      playerColor = document.getElementById('playerColor').value;
+      config.orientation = playerColor;
+      
+      // Initialize the board with the chosen orientation.
+      board = Chessboard('board', config);
+      
+      // Hide the color selection controls.
+      document.getElementById('color-selection').style.display = 'none';
+      
+      // Initialize Stockfish.
+      initEngine();
+      
+      // If the computer is white, let it make the first move.
+      if (playerColor === 'black') {
+        setTimeout(function() {
+          makeEngineMove();
+        }, 500);
+      } else {
+        document.getElementById('message').innerText = "Your turn...";
+      }
+    });
+  </script>
+</body>
+</html>
